@@ -37,6 +37,8 @@ warcx info <plugin-name>
 
 ## Installation
 
+WARCex requires Python 3.12 or later. You can install it using pip:
+
 ```bash
 pip install +git://github.com/QUT-Digital-Observatory/warcex.git
 ```

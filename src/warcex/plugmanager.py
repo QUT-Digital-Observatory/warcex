@@ -1,11 +1,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Iterator, Any
+from typing import Optional
 import os
 import importlib
 import pkgutil
 import inspect
 from pathlib import Path
+from warcex.data import RequestData, LazyResponseData
+from typer import echo
+from colorama import Fore, Style
 
 class WACZPlugin(ABC):
     """Base abstract class for WACZ plugins."""
@@ -18,7 +21,6 @@ class WACZPlugin(ABC):
             output_dir: Directory where extracted data will be saved
         """
         self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
 
     @dataclass
     class PluginInfo:
@@ -36,20 +38,20 @@ class WACZPlugin(ABC):
         Get information about the plugin.
 
         Returns:
-            Dictionary with keys: name, version, description, output_data
+            PluginInfo dataclass: name, version, description, output_data
         """
         pass
 
     @abstractmethod
-    def is_supported(self, request_data: dict) -> bool:
+    def is_supported(self, request_data: RequestData) -> bool:
         """
         Determine if this plugin supports the given web request.
 
         Args:
-            request_data: Dictionary containing details about the request including:
+            request_data: A RequestData dictionary with the following keys
                           - url: URL of the request
                           - method: HTTP method (GET, POST, etc.)
-                          - headers: HTTP headers
+                          - headers: RequestHeaders dictionary (HTTP headers)
                           - post_data: Parsed form data or request body
                           - response_type: Content type of the response
 
@@ -59,12 +61,13 @@ class WACZPlugin(ABC):
         pass
 
     @abstractmethod
-    def extract(self, content_iterator: Iterator[tuple[dict, Any]]) -> None:
+    def extract(self, request_data: RequestData, response_data: LazyResponseData) -> None:
         """
         Process content that matches this plugin's criteria.
 
         Args:
-            content_iterator: Iterator of (request_data, response_data) tuples
+            request_data: A dictionary containing details about the request including post_data
+            response_data: The response data as a dictionary (parsed JSON) or raw bytes
         """
         pass
 
@@ -83,17 +86,55 @@ class PluginManager:
         os.makedirs(output_dir, exist_ok=True)
         self.plugins: list[WACZPlugin] = self.discover_plugins("warcex.plugins")
 
-    def process_content(self, content_iterator: Iterator[tuple[dict, Any]]) -> None:
+    def process_content(
+        self, 
+        request_data: RequestData, 
+        response_data: LazyResponseData, 
+        only: Optional[str] = None
+    ) -> list[str]:
         """
-        Process content using the registered plugins.
-
+        Process content through appropriate plugins.
+        
         Args:
-            content_iterator: Iterator of (request_data, response_data) tuples
+            request_data: The request data dictionary
+            response_data: The lazily-loaded response data
+            only: Optional filter to process only a specific plugin
+            
+        Returns:
+            List of plugin names that successfully processed the content
         """
-        for request_data, response_data in content_iterator:
+        successful_plugins = []
+        
+        # Get plugins that support this request
+        plugins_to_try = []
+        
+        if only:
+            # If 'only' is specified, find just that plugin
             for plugin in self.plugins:
-                if plugin.is_supported(request_data):
-                    plugin.extract(content_iterator)
+                if plugin.get_info().name == only and plugin.is_supported(request_data):
+                    plugins_to_try.append(plugin)
+                    break
+        else:
+            # Otherwise, find all plugins that support this request
+            plugins_to_try = [p for p in self.plugins if p.is_supported(request_data)]
+        
+        # Process with each plugin
+        for plugin in plugins_to_try:
+            try:
+                plugin_name = plugin.get_info().name
+                echo(f"  Processing with {plugin_name}...")
+                
+                # Call the plugin's extract method
+                plugin.extract(request_data, response_data)
+                
+                # If we got here without exception, it was successful
+                successful_plugins.append(plugin_name)
+                
+            except Exception as e:
+                # Log the error but continue with other plugins
+                echo(f"{Fore.RED}Error processing with {plugin.get_info().name}: {e}{Style.RESET_ALL}")
+                
+        return successful_plugins
 
     def discover_plugins(self, plugins_package: str) -> list[WACZPlugin]:
         """

@@ -35,7 +35,7 @@ def custom_callback(ctx: typer.Context, param: typer.CallbackParam, value: bool)
 def extract(
     input_file: str,
     output_directory: Optional[str] = typer.Option(
-        "output",
+        None,
         "--output-dir",
         "-o",
         help="Output directory where extracted data will be saved.",
@@ -45,7 +45,12 @@ def extract(
         "--plugin", 
         "-p", 
         help="Specify Python plugin file(s) ending with .py. Multiple plugins can be specified.",
-        callback=lambda value: [p for p in value if p.endswith('.py')] if value else None
+        callback=lambda value: [p for p in value if p.endswith('.py')] if value else []
+    ),
+    only: Optional[str] = typer.Option(
+        None,
+        "--only",
+        help="Extract with only the specified plugin name.",
     )
 ):
     """Extract contents from a WARC file to the specified output directory."""
@@ -79,13 +84,17 @@ def extract(
         raise typer.Exit(1)
     
     # Proceed with validated paths
-    typer.echo(f"{Fore.YELLOW}Extracting {input_path} to {output_path}.{Style.RESET_ALL}")
+    typer.echo(f"{Fore.YELLOW}Extracting {input_path} to {output_path.resolve()}.{Style.RESET_ALL}")
     if plugin_paths:
         typer.echo(f"{Fore.CYAN}Using plugins: {', '.join(str(p) for p in plugin_paths)}{Style.RESET_ALL}")
     
     # Pass Path objects to WACZProcessor
-    with WACZProcessor(input_path, output_path, plugin_paths) as processor:
-        pass
+    with WACZProcessor(input_path, output_path, plugin_paths, only) as processor:
+        for warc_path in processor.get_warc_paths():
+            typer.echo(f"{Fore.YELLOW}Processing WARC file: {warc_path}{Style.RESET_ALL}")
+            #processor.process_warc(warc_path)
+
+
 
 @app.command()
 def plugins():
