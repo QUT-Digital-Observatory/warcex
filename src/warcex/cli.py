@@ -3,12 +3,18 @@ from pyfiglet import Figlet
 from typing import Optional
 from warcex import __version__
 from warcex.plugmanager import PluginManager
+from warcex.processor import WACZProcessor
 from os import path, getcwd
-from colorama import Fore, Back, Style, just_fix_windows_console
+from colorama import Fore, Style, just_fix_windows_console
+from pathlib import Path
 
 just_fix_windows_console()
+class AppContext:
+    def __init__(self):
+        self.current_dir = Path.cwd()
 
 app = typer.Typer()
+app_context = AppContext()
 
 def print_banner():
     """Print the custom banner with version"""
@@ -26,14 +32,65 @@ def custom_callback(ctx: typer.Context, param: typer.CallbackParam, value: bool)
     ctx.exit()
 
 @app.command()
-def extract(input_file: str, output_file: str):
-    """Extract contents from a WARC file to the specified output file."""
-    typer.echo(f"Extracting {input_file} to {output_file}")
+def extract(
+    input_file: str,
+    output_directory: Optional[str] = typer.Option(
+        "output",
+        "--output-dir",
+        "-o",
+        help="Output directory where extracted data will be saved.",
+    ),
+    plugins: Optional[list[str]] = typer.Option(
+        None, 
+        "--plugin", 
+        "-p", 
+        help="Specify Python plugin file(s) ending with .py. Multiple plugins can be specified.",
+        callback=lambda value: [p for p in value if p.endswith('.py')] if value else None
+    )
+):
+    """Extract contents from a WARC file to the specified output directory."""
+    # Convert to Path objects and validate
+    try:
+        input_path = Path(input_file).resolve(strict=True)
+        if not input_path.is_file():
+            typer.echo(f"{Fore.RED}Error: Input file does not exist or is not a file: {input_file}{Style.RESET_ALL}")
+            raise typer.Exit(1)
+        
+        if output_directory:
+            output_path = Path(output_directory)
+            if not output_path.exists():
+                typer.echo(f"{Fore.YELLOW}Output directory doesn't exist. Creating it.{Style.RESET_ALL}")
+                output_path.mkdir(parents=True)
+        else:
+            output_path = app_context.current_dir     
+
+        # Validate plugin paths
+        plugin_paths = []
+        if plugins:
+            for plugin in plugins:
+                plugin_path = Path(plugin).resolve(strict=True)
+                if not plugin_path.is_file():
+                    typer.echo(f"{Fore.RED}Error: Plugin file does not exist: {plugin}{Style.RESET_ALL}")
+                    raise typer.Exit(1)
+                plugin_paths.append(plugin_path)
+    
+    except (FileNotFoundError, PermissionError) as e:
+        typer.echo(f"{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
+        raise typer.Exit(1)
+    
+    # Proceed with validated paths
+    typer.echo(f"{Fore.YELLOW}Extracting {input_path} to {output_path}.{Style.RESET_ALL}")
+    if plugin_paths:
+        typer.echo(f"{Fore.CYAN}Using plugins: {', '.join(str(p) for p in plugin_paths)}{Style.RESET_ALL}")
+    
+    # Pass Path objects to WACZProcessor
+    with WACZProcessor(input_path, output_path, plugin_paths) as processor:
+        pass
 
 @app.command()
 def plugins():
     """List supported data extraction plugins."""
-    output_dir = path.abspath(getcwd())
+    output_dir = Path(getcwd()).resolve()
     manager = PluginManager(output_dir)
     typer.echo(f"{Style.BRIGHT}{Fore.CYAN}Available plugins:")
     for i, plugin in enumerate(manager.plugins):
@@ -43,8 +100,7 @@ def plugins():
 @app.command(name="info", help="Get information about a specific plugin by number or name.")
 def plugin_info(plugin_name: str):
     """Get information about a specific plugin."""
-    output_dir = path.abspath(getcwd())
-    manager = PluginManager(output_dir)
+    manager = PluginManager(app_context.current_dir)
     
     # Handle empty plugin list first
     if not manager.plugins:
@@ -52,7 +108,6 @@ def plugin_info(plugin_name: str):
         return
     
     plugin = None
-    # Try to interpret input as a number
     try:
         plugin_number = int(plugin_name)
         # Check if the number is within valid range
@@ -73,7 +128,6 @@ def plugin_info(plugin_name: str):
             if plugin:
                 plugin_info = plugin.get_info()
                 typer.echo(f"{Fore.YELLOW}Found plugin with similar name: {plugin_info.name}{Style.RESET_ALL}")
-                
     
     # Display plugin info if found
     if plugin is None:
@@ -113,7 +167,7 @@ def main(
 ):
     """WARCex - A tool for extracting contents from WARC files."""
     if version:
-        typer.echo(f"WARCex version: {__version__}")
+        typer.echo(f"{Fore.CYAN}WARCex version: {Fore.GREEN}{__version__}{Style.RESET_ALL}")
         raise typer.Exit()
     
     if ctx.invoked_subcommand is None:

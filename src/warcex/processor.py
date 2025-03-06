@@ -2,13 +2,14 @@ import json
 import zipfile
 import tempfile
 import os
-import importlib
-import pkgutil
-import inspect
-from typing import Optional, Iterator, Any, Tuple, Type, List
+from typing import Optional, Iterator, Any
 import shutil
 from warcio.archiveiterator import ArchiveIterator
-from warcex.plugins import WACZPlugin
+from warcex.plugmanager import WACZPlugin, PluginManager
+from colorama import Fore, Style
+from typer import echo
+from sys import exit
+from pathlib import Path
 
 class WACZProcessor:
     """
@@ -17,7 +18,7 @@ class WACZProcessor:
     Supports a plugin system for custom extractors.
     """
     
-    def __init__(self, wacz_path: str, lazy_load: bool = True):
+    def __init__(self, wacz_path: Path, output_folder: Path, manual_plugins: Optional[list[Path]] = None):
         """
         Initialize the WACZProcessor with a path to a WACZ file.
         
@@ -26,16 +27,30 @@ class WACZProcessor:
             lazy_load: If True, files are extracted only when needed.
                       If False, the archive is extracted during initialization.
         """
+        self.output_dir = output_folder
         self.wacz_path = wacz_path
         self._temp_dir: Optional[str] = None
         self._zip_ref: Optional[zipfile.ZipFile] = None
         self._pages = None
         self._metadata = None
         self._extracted_files: set[str] = set()
-        self._lazy_load = lazy_load
         self._is_open = False
         self._file_list: list[str] = []
         self._plugins: dict[str, WACZPlugin] = {}
+        self.plugin_manager = PluginManager(output_folder)
+        self._lazy_load = True
+
+        # Load plugins
+        if manual_plugins:
+            plugin_names = []
+            for plugin_file in manual_plugins:
+                try:
+                   plugin_info = self.plugin_manager.sideload_plugin(plugin_file)
+                except Exception as e:
+                    echo(f"{Fore.RED}Error loading plugin {plugin_file}: {e}{Style.RESET_ALL}")
+                    raise e
+                plugin_names.append(plugin_info.name)
+            echo(f"{Fore.CYAN}Loaded plugins: {', '.join(plugin_names)}{Style.RESET_ALL}.")
         
         # Validate that the file exists and is a zip file
         if not os.path.exists(wacz_path):
@@ -47,11 +62,6 @@ class WACZProcessor:
         except zipfile.BadZipFile:
             raise ValueError(f"File is not a valid ZIP/WACZ file: {wacz_path}")
             
-        # If not lazy loading, extract everything immediately
-        if not lazy_load:
-            self._open()
-            self._extract_all()
-    
     def _open(self):
         """Open the WACZ archive and create a temporary directory for extraction."""
         if self._is_open:
@@ -257,7 +267,7 @@ class WACZProcessor:
             # Unknown content type
             return {}
     
-    def iter_request_response_pairs(self) -> Iterator[Tuple[dict, Any]]:
+    def iter_request_response_pairs(self) -> Iterator[tuple[dict, Any]]:
         """
         Iterate through request-response pairs in all WARC files.
         

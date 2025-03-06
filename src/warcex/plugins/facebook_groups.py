@@ -1,12 +1,12 @@
 from warcex.plugmanager import WACZPlugin
 from typing import Iterator, Any
-
+from pathlib import Path
 class FacebookGroupsPlugin(WACZPlugin):
     """
     Facebook Groups plugin that extracts posts and comments from a Facebook Groups page. This plugin processes GraphQL API responses and extracts the data from them.
     """
     
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: Path):
         super().__init__(output_dir)
     
     def get_info(self) -> WACZPlugin.PluginInfo:

@@ -5,12 +5,12 @@ import os
 import importlib
 import pkgutil
 import inspect
-
+from pathlib import Path
 
 class WACZPlugin(ABC):
     """Base abstract class for WACZ plugins."""
 
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: Path):
         """
         Initialize the plugin with an output directory.
 
@@ -72,7 +72,7 @@ class WACZPlugin(ABC):
 class PluginManager:
     """Class to manage WACZ plugins."""
 
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: Path):
         """
         Initialize the plugin manager with an output directory.
 
@@ -127,7 +127,7 @@ class PluginManager:
                         and item.__module__ == module.__name__
                     ):
                         # Create a plugin-specific output directory
-                        plugin_output_dir = os.path.join(self.output_dir, item_name)
+                        plugin_output_dir = self.output_dir / item_name
                         # Instantiate the plugin with its output directory
                         plugin_instance = item(plugin_output_dir)
                         plugin_instances.append(plugin_instance)
@@ -139,3 +139,56 @@ class PluginManager:
                 continue
 
         return plugin_instances
+
+    def sideload_plugin(self, plugin_file: Path) -> WACZPlugin.PluginInfo:
+        """
+        Sideload a plugin from a file.
+
+        Args:
+            plugin_file: Path to the plugin file
+
+        Returns:
+            Plugin information object
+        """
+        if not plugin_file.exists():
+            raise FileNotFoundError(f"Plugin file not found: {plugin_file}")
+            
+        plugin_instance = None
+        try:
+            # Get the module name from the file name (without extension)
+            module_name = plugin_file.stem
+            
+            # Use importlib.util to load the module from file path
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, plugin_file)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not load spec for {plugin_file}")
+                
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            
+            # Find plugin classes in the module
+            for item_name, item in inspect.getmembers(module, inspect.isclass):
+                if (
+                    issubclass(item, WACZPlugin)
+                    and item is not WACZPlugin
+                    and item.__module__ == module.__name__
+                ):
+                    # Create a plugin-specific output directory
+                    plugin_output_dir = self.output_dir / item_name
+                    # Instantiate the plugin with its output directory
+                    plugin_instance = item(plugin_output_dir)
+                    self.plugins.append(plugin_instance)
+                    break
+                    
+            if plugin_instance is None:
+                raise ValueError(f"No valid WACZPlugin found in {plugin_file}")
+                
+        except (ImportError, AttributeError) as e:
+            print(f"Error loading plugin {plugin_file}: {e}")
+            raise
+        except Exception as e:
+            print(f"Unexpected error instantiating plugin from {plugin_file}: {e}")
+            raise
+            
+        return plugin_instance.get_info()
