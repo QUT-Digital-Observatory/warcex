@@ -90,9 +90,9 @@ def extract(
     
     # Pass Path objects to WACZProcessor
     with WACZProcessor(input_path, output_path, plugin_paths, only) as processor:
-        for warc_path in processor.get_warc_paths():
-            typer.echo(f"{Fore.YELLOW}Processing WARC file: {warc_path}{Style.RESET_ALL}")
-            #processor.process_warc(warc_path)
+        # for warc_path in processor.get_warc_paths():
+        #     typer.echo(f"{Fore.YELLOW}Processing WARC file: {warc_path}{Style.RESET_ALL}")
+        processor.extract()
 
 
 

@@ -1,17 +1,16 @@
-import json
+from dataclasses import dataclass
+from typing import Optional, Tuple, Iterator
+import os
 import zipfile
 import tempfile
-import os
-from typing import Optional, Iterator, Any
-from dataclasses import dataclass
 import shutil
 from warcio.archiveiterator import ArchiveIterator
-from warcex.plugmanager import PluginManager
+from warcex.plugmanager import PluginManager, WACZPlugin
 from colorama import Fore, Style
 from typer import echo
 from pathlib import Path
-from warcex.data import RequestData, LazyResponseData, RequestHeaders
-
+from warcex.data import RequestData, ResponseData
+from urllib.parse import urlparse, parse_qs
 
 class WACZProcessor:
     """
@@ -131,129 +130,139 @@ class WACZProcessor:
 
         return self._extract_file(warc_path)
 
-    def _extract_post_data(self, record) -> dict[str, Any]:
-        """
-        Extract POST data from a request record.
-
-        Args:
-            record: WARC request record
-
-        Returns:
-            Dictionary of POST data or empty dict if not a POST or no data
-        """
-        if (
-            record.http_headers.get_header("Content-Type")
-            == "application/x-www-form-urlencoded"
-        ):
-            try:
-                # Read the form data
-                content = record.content_stream().read().decode("utf-8")
-                from urllib.parse import parse_qs
-
-                return {
-                    k: v[0] if len(v) == 1 else v for k, v in parse_qs(content).items()
-                }
-            except Exception:
-                return {}
-        elif "json" in record.http_headers.get_header("Content-Type", "").lower():
-            try:
-                # Parse JSON request body
-                content = record.content_stream().read().decode("utf-8")
-                return json.loads(content)
-            except Exception:
-                return {}
-        else:
-            # Unknown content type
-            return {}
-
     def iter_request_response_pairs(
         self,
-    ) -> Iterator[tuple[RequestData, LazyResponseData]]:
+    ) -> Iterator[Tuple[RequestData, ResponseData, WACZPlugin]]:
         """
         Iterate through request-response pairs in all WARC files.
+        Only processes request-response pairs that match a plugin endpoint.
+        Also returns the matching plugin.
 
         Returns:
-            Iterator of (request_data, response_data) tuples
+            Iterator of (request_data, response_data, plugin) tuples
         """
-        # Create a mapping of request IDs to request data
-        request_map: dict[str, RequestData] = {}
-
+        # Keep track of statistics
+        stats = {
+            "total_requests": 0,
+            "total_responses": 0,
+            "matched_pairs": 0,
+            "plugin_matched": 0
+        }
+        
         # Process all WARC files
         for warc_path in self.get_warc_paths():
+            echo(f"{Fore.YELLOW}Processing WARC file: {warc_path}{Style.RESET_ALL}")
             extracted_warc = self.extract_warc_file(warc_path)
 
-            # First pass: collect all requests
+            # First pass: collect URL information from requests to check for plugin matches
+            # Use request_id as key to handle multiple requests to the same URL
+            request_info_map = {}
             with open(extracted_warc, "rb") as warc_file:
                 for record in ArchiveIterator(warc_file):
                     if record.rec_type == "request":
-                        request_id = record.rec_headers.get_header("WARC-Record-ID")
+                        stats["total_requests"] += 1
                         request_url = record.rec_headers.get_header("WARC-Target-URI")
-                        request_method = record.http_headers.get_header("Method", "GET")
-
-                        # Extract headers
-                        headers: RequestHeaders = {}
-                        for header in record.http_headers.headers:
-                            if header[0] not in ("Content-Length", "Method"):
-                                headers[header[0]] = header[1]
-
-                        # Extract POST data if applicable
-                        post_data = (
-                            self._extract_post_data(record)
-                            if request_method == "POST"
-                            else {}
-                        )
-
-                        request_data: RequestData = {
-                            "url": request_url,
-                            "method": request_method,
-                            "headers": headers,
-                            "post_data": post_data,
-                            "response_type": "",  # Will be filled when processing response
-                            "content_length": None,
-                        }
-                        request_map[request_id] = request_data
-
-            # Second pass: match responses to requests
+                        concurrent_to = record.rec_headers.get_header("WARC-Concurrent-To")
+                        request_id = record.rec_headers.get_header("WARC-Record-ID")
+                        
+                        if request_url and concurrent_to and request_id:
+                            # Check if any plugin matches this URL
+                            plugin = self.plugin_manager.get_plugin_for_url(request_url, only=self.only)
+                            if plugin:
+                                # Store request info keyed by request_id to handle multiple requests to same URL
+                                request_info_map[request_id] = {
+                                    "url": request_url,
+                                    "concurrent_to": concurrent_to,
+                                    "plugin": plugin,
+                                    "method": record.http_headers.get_header("Method", "GET"),
+                                    "headers": {h[0]: h[1] for h in record.http_headers.headers 
+                                               if h[0] not in ("Content-Length", "Method")},
+                                    "timestamp": record.rec_headers.get_header("WARC-Date", "")
+                                }
+            
+            if not request_info_map:
+                # Skip second pass if no requests matched a plugin
+                continue
+                
+            # Second pass: collect responses that match our filtered requests
+            response_map = {}
+            all_concurrent_ids = [info["concurrent_to"] for info in request_info_map.values()]
             with open(extracted_warc, "rb") as warc_file:
                 for record in ArchiveIterator(warc_file):
                     if record.rec_type == "response":
-                        response_for = record.rec_headers.get_header("WARC-Concurrent-To")
+                        stats["total_responses"] += 1
+                        record_id = record.rec_headers.get_header("WARC-Record-ID")
 
-                        if response_for in request_map:
-                            request_data = request_map[response_for]
-
-                            # Add response metadata to request data
-                            response_type = record.http_headers.get_header(
-                                "Content-Type", ""
-                            )
-                            request_data["response_type"] = response_type
-
+                        # Only process responses that are needed by matched requests
+                        if record_id and record_id in all_concurrent_ids:
+                            # Get response metadata
+                            response_type = record.http_headers.get_header("Content-Type", "")
+                            
                             try:
-                                content_length = int(
-                                    record.http_headers.get_header("Content-Length", "0")
-                                )
+                                content_length = int(record.http_headers.get_header("Content-Length", "0"))
                             except ValueError:
                                 content_length = None
-
-                            request_data["content_length"] = content_length
-
-                            # Create lazy response data object
-                            response_data = LazyResponseData(
-                                record.content_stream(), response_type, content_length
+                            
+                            status_code = record.http_headers.get_statuscode()
+                            
+                            # Get the full content
+                            content_bytes = record.content_stream().read()
+                            
+                            # Store response data
+                            response_map[record_id] = ResponseData(
+                                content=content_bytes,
+                                content_type=response_type,
+                                content_length=content_length,
+                                status_code=status_code
                             )
+            
+            # Now yield matched request-response-plugin tuples
+            for req_id, request_info in request_info_map.items():
+                url = request_info["url"]
+                concurrent_to = request_info["concurrent_to"]
 
-                            yield (request_data, response_data)
+                if concurrent_to in response_map:
+                    # Get query parameters from URL
+                    parsed_url = urlparse(url)
+                    query_params = parse_qs(parsed_url.query)
+                    query_data = {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
+                    
+                    # Get the stored response data
+                    response_data = response_map[concurrent_to]
+                    
+                    # Create request data
+                    request_data = RequestData(
+                        url=url,
+                        method=request_info["method"],
+                        headers=request_info["headers"],
+                        query_data=query_data,
+                        response_type=response_data.content_type,
+                        content_length=response_data.content_length,
+                        timestamp=request_info["timestamp"],
+                        status_code=response_data.status_code
+                    )
+                    
+                    stats["matched_pairs"] += 1
+                    stats["plugin_matched"] += 1
+                    
+                    yield (request_data, response_data, request_info["plugin"])
+        
+        # Print final statistics
+        echo(f"{Fore.GREEN}Processed {stats['total_requests']} requests and {stats['total_responses']} responses{Style.RESET_ALL}")
+        echo(f"{Fore.GREEN}Found {stats['matched_pairs']} matched request-response pairs{Style.RESET_ALL}")
+        echo(f"{Fore.GREEN}Found {stats['plugin_matched']} pairs with matching plugins{Style.RESET_ALL}")
 
     @dataclass
     class ExtractionResult:
         """Results of the extraction process."""
-
         total_processed: int
         plugin_counts: dict[str, int]
 
     def extract(self) -> "WACZProcessor.ExtractionResult":
         """
-        Process all request-response pairs in the archive and pass them to the PluginManager.
+        Process all request-response pairs in the archive and pass them to matching plugins.
+        Only processes pairs that have a matching plugin.
+        Calls finalise() on all used plugins at the end.
 
         Returns:
             ExtractionResult with statistics about processed items
@@ -263,18 +272,25 @@ class WACZProcessor:
 
         echo(f"{Fore.CYAN}Extracting content from: {self.wacz_path}{Style.RESET_ALL}")
 
-        # Process each request-response pair
-        for request_data, response_data in self.iter_request_response_pairs():
-            # Let the plugin manager handle plugin selection and processing
-            processed = self.plugin_manager.process_content(
-                request_data, response_data, only=self.only
-            )
+        # Process only pairs that have a matching plugin
+        for request_data, response_data, plugin in self.iter_request_response_pairs():
+            # Get plugin name for stats
+            plugin_name = plugin.get_info().name
+            
+            try:
+                # Call the plugin's extract method directly
+                plugin.extract(request_data, response_data)
+                
+                # Update counters
+                plugin_counts[plugin_name] = plugin_counts.get(plugin_name, 0) + 1
+                total_processed += 1
+                
+            except Exception as e:
+                # Log the error but continue with other pairs
+                echo(f"{Fore.RED}Error processing with {plugin_name}: {e}{Style.RESET_ALL}")
 
-            # Update counters based on processed results
-            if processed:
-                for plugin_name in processed:
-                    plugin_counts[plugin_name] = plugin_counts.get(plugin_name, 0) + 1
-                    total_processed += 1
+        # Call finalise on all plugins that were used
+        self.plugin_manager.finalise_all_plugins()
 
         # Create and return result object
         result = WACZProcessor.ExtractionResult(
