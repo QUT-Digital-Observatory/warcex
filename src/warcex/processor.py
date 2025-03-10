@@ -290,6 +290,7 @@ class WACZProcessor:
             except Exception as e:
                 # Log the error but continue with other pairs
                 echo(f"{Fore.RED}Error processing with {plugin_name}: {e}{Style.RESET_ALL}")
+                raise e
 
         # Call finalise on all plugins that were used
         self.plugin_manager.finalise_all_plugins()

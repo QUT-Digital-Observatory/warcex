@@ -100,7 +100,6 @@ class PluginManager:
         self.pattern_to_plugin_map: Dict[re.Pattern, WACZPlugin] = (
             self._build_pattern_map()
         )
-        print(self.pattern_to_plugin_map)
         # Statistics
         self.stats = {"total_matches": 0, "plugins_used": set()}
 
@@ -129,7 +128,6 @@ class PluginManager:
                 # Compile the regex and store with its plugin
                 compiled_regex = re.compile(regex_pattern)
                 pattern_map[compiled_regex] = plugin
-        print('map', pattern_map)
         return pattern_map
 
     def get_plugin_for_url(
@@ -180,10 +178,10 @@ class PluginManager:
                     echo(f"  Finalizing plugin: {plugin.get_info().name}...")
                     plugin.finalise()
                 except Exception as e:
-                    # Log the error but continue with other plugins
                     echo(
                         f"{Fore.RED}Error finalizing plugin {plugin.get_info().name}: {e}{Style.RESET_ALL}"
                     )
+
 
     def discover_plugins(self, plugins_package: str) -> list[WACZPlugin]:
         """

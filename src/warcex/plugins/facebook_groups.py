@@ -6,11 +6,23 @@ from dataclasses import asdict
 from warcex.data import RequestData, ResponseData
 from typing import Any, TypedDict
 
-
+class FacebookStoryComment(TypedDict):
+    id: str
+    author: str
+    author_id: str
+    text: str
+    reply_to: str | None
+class FacebookGroupStory(TypedDict):
+    author_name: str
+    author_id: str
+    text: str | None
+    video: str | None
+    story_id: str
+    comments: list[FacebookStoryComment]
 class FacebookGroup(TypedDict):
     name: str
     partial_url: str
-    stories: dict[str, Any]
+    stories: dict[str, FacebookGroupStory]
 
 class FacebookGroupsPlugin(WACZPlugin):
     """
@@ -65,6 +77,19 @@ class FacebookGroupsPlugin(WACZPlugin):
         if request_data.url == "https://www.facebook.com/ajax/bulk-route-definitions/":
             self._extract_route_definition(response_data)
             return
+        
+        # Process data
+        json_data_array = self._decode_json_bytes(response_data.content)
+        if json_data_array is None:
+            print("Content is not JSON.")
+            return
+        for json_data in json_data_array:
+            if not 'data' in json_data:
+                print('No data field in json_data')
+                return
+            data_obj = json_data['data']
+            if 'node' in data_obj:
+                self._extract_node(data_obj['node'])
 
         json_data = self._decode_json_bytes(response_data.content)
         if json_data is None:
@@ -75,6 +100,58 @@ class FacebookGroupsPlugin(WACZPlugin):
 
         self.data_pairs.append({"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
 
+    def _extract_node(self, node_data: dict[str, Any]) -> None:
+        data_type = node_data['__typename']
+        if data_type == 'Story':
+            story_id = node_data['id']
+            try:
+                group_id = node_data['feedback']['associated_group']['id']
+            except KeyError:
+                print('associated_group', node_data['feedback']['associated_group'])
+                exit()
+            if story_id in self.groups[group_id]['stories']:
+                return # We only load this story once
+            # Create a new story entry        
+            has_text: bool = node_data['comet_sections']['content']['story']['comet_sections']['message'] is not None
+            if has_text:
+                story_text = node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
+            else:
+                story_text = None
+            video = None
+            if 'attachments' in node_data['comet_sections']['content']['story']:
+                for attachment in node_data['comet_sections']['content']['story']['attachments']:
+                    if 'target' in attachment and attachment['target']['__typename'] == 'Video':
+                        video = attachment['target']['id']
+            author_id = node_data['comet_sections']['content']['story']['actors'][0]['id']
+            author_name = node_data['comet_sections']['content']['story']['actors'][0]['name']
+            if 'story' not in node_data['comet_sections']['feedback']:
+                print('No story in feedback', node_data['feedback'])
+                self._write_debug_json(node_data)
+                exit()
+                return
+            comments = node_data['comet_sections']['feedback']['story']['story_ufi_container']['story']['feedback_context']['interesting_top_level_comments']
+            comments_data: list[FacebookStoryComment] = []
+            for comment in comments:
+                comment_data: FacebookStoryComment = {
+                    'id': comment['comment']['id'],
+                    'author': comment['comment']['author']['name'],
+                    'author_id': comment['comment']['author']['id'],
+                    'text': comment['comment']['body']['text'],
+                    'reply_to': None
+                }
+                comments_data.append(comment_data)
+
+            print('Found story:', story_text)
+            story: FacebookGroupStory = {
+                'author_name': author_name,
+                'author_id': author_id,
+                'text': story_text,
+                'video': video,
+                'story_id': story_id,
+                'comments': comments_data
+            }
+            self.groups[group_id]['stories'][story_id] = story
+
     def finalise(self):
         """
         Finalize processing and generate output.
@@ -84,6 +161,13 @@ class FacebookGroupsPlugin(WACZPlugin):
         """
         with open(self.output_dir / "data_pairs.json", "w") as fw:
             json.dump(self.data_pairs, fw, indent=2)
+
+        with open(self.output_dir / "groups.json", "w") as fw:
+            json.dump(self.groups, fw, indent=2)
+
+    def _write_debug_json(self, data: Any):
+        with open('debug/debug.json', 'w') as f:
+            json.dump(data, f, indent=2)
 
     def _extract_route_definition(self, response_data: ResponseData) -> None:
         # Strip off the weird "for (;;);" garbage at the beginning of the response
