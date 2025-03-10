@@ -4,6 +4,14 @@ from pathlib import Path
 import json
 from dataclasses import asdict
 from warcex.data import RequestData, ResponseData
+from typing import Any, TypedDict
+
+
+class FacebookGroup(TypedDict):
+    name: str
+    partial_url: str
+    stories: dict[str, Any]
+
 class FacebookGroupsPlugin(WACZPlugin):
     """
     Facebook Groups plugin that extracts posts and comments from a Facebook Groups page. This plugin processes GraphQL API responses and extracts the data from them.
@@ -13,6 +21,7 @@ class FacebookGroupsPlugin(WACZPlugin):
         super().__init__(output_dir)
         self.data_pairs = [] 
         print('initialised')
+        self.groups: dict[str, FacebookGroup] = {}
 
     def get_info(self) -> WACZPlugin.PluginInfo:
         """
@@ -41,7 +50,7 @@ class FacebookGroupsPlugin(WACZPlugin):
         Returns:
             List of URL patterns
         """
-        return ["https://www.facebook.com/api/graphql/"]
+        return ["https://www.facebook.com/api/graphql/", "https://www.facebook.com/ajax/bulk-route-definitions/"]
 
     def extract(self, request_data: RequestData, response_data: ResponseData) -> None:
         """
@@ -52,12 +61,18 @@ class FacebookGroupsPlugin(WACZPlugin):
             response_data: The response data as a dictionary (parsed JSON) or raw bytes
         """
 
+        # We use this to get the name and ID of groups
+        if request_data.url == "https://www.facebook.com/ajax/bulk-route-definitions/":
+            self._extract_route_definition(response_data)
+            return
+
         json_data = self._decode_json_bytes(response_data.content)
         if json_data is None:
             print("Content is not JSON.")
             with open(self.output_dir / "bad_request_json_data.dat", "wb") as fw:
                 fw.write(response_data.content)
             return
+
         self.data_pairs.append({"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
 
     def finalise(self):
@@ -70,6 +85,33 @@ class FacebookGroupsPlugin(WACZPlugin):
         with open(self.output_dir / "data_pairs.json", "w") as fw:
             json.dump(self.data_pairs, fw, indent=2)
 
+    def _extract_route_definition(self, response_data: ResponseData) -> None:
+        # Strip off the weird "for (;;);" garbage at the beginning of the response
+        content_str = response_data.content.decode('utf-8')
+        start_index = content_str.find('{')
+        content_str = content_str[start_index:]
+        json_data = json.loads(content_str)
+        def _extract_group_info(json_data):
+            payloads = json_data['payload']['payloads']
+            try:
+                for key, value in payloads.items():
+                    if key.startswith('/groups/') and key.count('/') == 2: # Ignore all the sub group stuff
+                        group_title = value['result']['exports']['meta']['title']
+                        group_id = value['result']['exports']['rootView']['props']['groupID']
+                        url_partial = key
+                        return group_title, group_id, url_partial
+                return None
+            except (KeyError, TypeError):
+                print ('Error extracting group info from', payloads)
+                return None
+        vals = _extract_group_info(json_data)
+        if not vals:
+            return
+        group_title, group_id, url_partial = vals
+        if group_id not in self.groups:
+            print('Found Facebook group:', group_title)
+            self.groups[group_id] = {"name": group_title, "partial_url": url_partial, "stories": {}}
+    
     def _decode_json_bytes(self, data_bytes: bytes) -> list[dict] | None:
         """
         Decodes bytes that are expected to be JSON or JSONL into a list of dictionaries.

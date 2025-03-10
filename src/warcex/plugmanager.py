@@ -129,7 +129,7 @@ class PluginManager:
                 # Compile the regex and store with its plugin
                 compiled_regex = re.compile(regex_pattern)
                 pattern_map[compiled_regex] = plugin
-
+        print('map', pattern_map)
         return pattern_map
 
     def get_plugin_for_url(

@@ -18,3 +18,5 @@ __pycache__/
 *.env
 output/
 debug/
+test*.bat
+test*.py

@@ -164,7 +164,7 @@ class WACZProcessor:
                         request_url = record.rec_headers.get_header("WARC-Target-URI")
                         concurrent_to = record.rec_headers.get_header("WARC-Concurrent-To")
                         request_id = record.rec_headers.get_header("WARC-Record-ID")
-                        
+
                         if request_url and concurrent_to and request_id:
                             # Check if any plugin matches this URL
                             plugin = self.plugin_manager.get_plugin_for_url(request_url, only=self.only)
@@ -185,13 +185,15 @@ class WACZProcessor:
                 continue
                 
             # Second pass: collect responses that match our filtered requests
-            response_map = {}
+            response_map: dict[str, ResponseData] = {}
             all_concurrent_ids = [info["concurrent_to"] for info in request_info_map.values()]
             with open(extracted_warc, "rb") as warc_file:
                 for record in ArchiveIterator(warc_file):
                     if record.rec_type == "response":
                         stats["total_responses"] += 1
                         record_id = record.rec_headers.get_header("WARC-Record-ID")
+                        # Get the url from the headers
+                        url = record.rec_headers.get_header("WARC-Target-URI")
 
                         # Only process responses that are needed by matched requests
                         if record_id and record_id in all_concurrent_ids:
