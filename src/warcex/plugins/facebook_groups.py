@@ -5,25 +5,27 @@ import json
 from dataclasses import asdict
 from warcex.data import RequestData, ResponseData
 from typing import Any, TypedDict
+from bs4 import BeautifulSoup
 
 class FacebookStoryComment(TypedDict):
     id: str
     author: str
     author_id: str
-    text: str
+    text: str | None
+    sticker: str | None
     reply_to: str | None
 class FacebookGroupStory(TypedDict):
     author_name: str
     author_id: str
     text: str | None
     video: str | None
-    story_id: str
     comments: list[FacebookStoryComment]
 class FacebookGroup(TypedDict):
     name: str
     partial_url: str
+    description: str | None
+    location: str | None
     stories: dict[str, FacebookGroupStory]
-
 class FacebookGroupsPlugin(WACZPlugin):
     """
     Facebook Groups plugin that extracts posts and comments from a Facebook Groups page. This plugin processes GraphQL API responses and extracts the data from them.
@@ -62,7 +64,7 @@ class FacebookGroupsPlugin(WACZPlugin):
         Returns:
             List of URL patterns
         """
-        return ["https://www.facebook.com/api/graphql/", "https://www.facebook.com/ajax/bulk-route-definitions/"]
+        return ["https://www.facebook.com/api/graphql/", "https://www.facebook.com/ajax/bulk-route-definitions/", "https://www.facebook.com/groups/*"]
 
     def extract(self, request_data: RequestData, response_data: ResponseData) -> None:
         """
@@ -77,6 +79,10 @@ class FacebookGroupsPlugin(WACZPlugin):
         if request_data.url == "https://www.facebook.com/ajax/bulk-route-definitions/":
             self._extract_route_definition(response_data)
             return
+        elif "/groups/" in request_data.url:
+            print('GROUP PAGE:', request_data.url)
+            self._extract_group_html(response_data)
+            return
         
         # Process data
         json_data_array = self._decode_json_bytes(response_data.content)
@@ -88,8 +94,11 @@ class FacebookGroupsPlugin(WACZPlugin):
                 print('No data field in json_data')
                 return
             data_obj = json_data['data']
-            if 'node' in data_obj:
-                self._extract_node(data_obj['node'])
+            if 'node' in data_obj and data_obj['node']['__typename'] == 'Story':
+                self._extract_storynode(data_obj['node'])
+            elif 'story_card' in data_obj:
+                print("TRIGGERING STORY CARD EXTRACTION")
+                self._extract_story_card(data_obj)
 
         json_data = self._decode_json_bytes(response_data.content)
         if json_data is None:
@@ -100,57 +109,160 @@ class FacebookGroupsPlugin(WACZPlugin):
 
         self.data_pairs.append({"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
 
-    def _extract_node(self, node_data: dict[str, Any]) -> None:
-        data_type = node_data['__typename']
-        if data_type == 'Story':
-            story_id = node_data['id']
+    def _extract_group_html(self, response_data: ResponseData) -> None:
+        """
+        Extracts group details from the html
+        """
+        content_str = response_data.content.decode('utf-8')
+        soup = BeautifulSoup(content_str, 'html.parser')
+        group_title = soup.title.string # type: ignore
+        assert group_title is not None
+        json_data = None
+        for script in soup.find_all('script', type='application/json'):
             try:
-                group_id = node_data['feedback']['associated_group']['id']
-            except KeyError:
-                print('associated_group', node_data['feedback']['associated_group'])
-                exit()
-            if story_id in self.groups[group_id]['stories']:
-                return # We only load this story once
-            # Create a new story entry        
-            has_text: bool = node_data['comet_sections']['content']['story']['comet_sections']['message'] is not None
-            if has_text:
-                story_text = node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
-            else:
-                story_text = None
-            video = None
-            if 'attachments' in node_data['comet_sections']['content']['story']:
-                for attachment in node_data['comet_sections']['content']['story']['attachments']:
-                    if 'target' in attachment and attachment['target']['__typename'] == 'Video':
-                        video = attachment['target']['id']
-            author_id = node_data['comet_sections']['content']['story']['actors'][0]['id']
-            author_name = node_data['comet_sections']['content']['story']['actors'][0]['name']
-            if 'story' not in node_data['comet_sections']['feedback']:
-                print('No story in feedback', node_data['feedback'])
-                self._write_debug_json(node_data)
-                exit()
-                return
-            comments = node_data['comet_sections']['feedback']['story']['story_ufi_container']['story']['feedback_context']['interesting_top_level_comments']
-            comments_data: list[FacebookStoryComment] = []
-            for comment in comments:
-                comment_data: FacebookStoryComment = {
-                    'id': comment['comment']['id'],
-                    'author': comment['comment']['author']['name'],
-                    'author_id': comment['comment']['author']['id'],
-                    'text': comment['comment']['body']['text'],
-                    'reply_to': None
-                }
-                comments_data.append(comment_data)
+                # load the JSON data from the script tag
+                json_data = json.loads(script.string) # type: ignore
+            except json.JSONDecodeError:
+                print(f"Error decoding JSON from script tag: {script}")
+                continue
+            except TypeError: #script.string is none
+                print("script tag has no string")
+                continue
 
-            print('Found story:', story_text)
-            story: FacebookGroupStory = {
-                'author_name': author_name,
-                'author_id': author_id,
-                'text': story_text,
-                'video': video,
-                'story_id': story_id,
-                'comments': comments_data
+            if '"CometGroupDiscussionTabAboutCardRenderer"' in script.string:
+                comment_discussion_tab_cards = self._find_objects_by_typename(json_data, "CometGroupDiscussionTabAboutCardRenderer")
+                if comment_discussion_tab_cards:
+                    card = comment_discussion_tab_cards[0]
+                    group_id = card['group']['id']
+                    if group_id not in self.groups:
+                        group: FacebookGroup = {
+                            "name": group_title,
+                            "location": card['group']['group_locations'][0]['name'] if 'group_locations' in card['group'] else None,
+                            "description": card['group']['description_with_entities']['text'] if 'description_with_entities' in card['group'] else None,
+                            "partial_url": "/groups/"+card['group']['group_address'],
+                            "stories": {}
+                        }
+                        self.groups[group_id] = group
+            elif '"CometStorySections"' in script.string:
+                print("Found Story nodes from HTML embedded JSON")
+                stories = self._find_objects_by_typename(json_data, "Story")
+                for story in stories:
+                    if '_post_id' in story:
+                        self._extract_storynode(story)
+                    
+        if json_data is None:
+            print("No JSON data found in the HTML")
+            return
+        
+    def _extract_story_card(self, data_obj: dict[str, Any]) -> None:
+        feedback_data = data_obj['feedback']
+        story_card_data = data_obj['story_card']
+        self._write_debug_json(feedback_data, 'debug/feedback.json', True)
+        if 'ufi_renderer' in feedback_data:
+            group_id = story_card_data['target_group']['id']
+            story_id = story_card_data['post_id']
+            comments = feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback']['comment_rendering_instance_for_feed_location']['comments']['edges']
+            if group_id not in self.groups:
+                print('Group not found:', group_id)
+                return
+            if story_id not in self.groups[group_id]['stories']:
+                print('Story not found:', story_id)
+                print(self.groups[group_id]['stories'].keys())
+                self._write_debug_json(feedback_data, 'debug/feedback_notfound.json')
+                story: FacebookGroupStory = {
+                    "author_name": feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback']['comment_rendering_instance_for_feed_location']['comments']['edges'][0]['node']['parent_feedback']['owning_profile']['name'],
+                    "author_id": story_card_data['target_group']['id'],
+                    "text": None,
+                    "video": None,
+                    "comments": []
+                }
+                self.groups[group_id]['stories'][story_id] = story
+            else:
+                print('Adding comments to existing story')
+            existing_comments = self.groups[group_id]['stories'][story_id]['comments']
+            for comment in comments:
+                cnode = comment['node']
+                comment_id = cnode['id']
+                # Check if this comment is already in the list
+                if comment_id in [c['id'] for c in existing_comments]:
+                    print("WE HAVE THIS COMMENT ALREADY")
+                    continue
+                print("ADDING COMMENT")
+                sticker = None
+                if 'attachments' in cnode and len(cnode['attachments']) > 0:
+                    media = cnode['attachments'][0]['style_type_renderer']['attachment']['media']
+                    if media['__typename'] == 'Sticker':
+                        sticker = media['label']
+                    # We should probably support photos and videos here too
+                try:
+                    comment_data: FacebookStoryComment = {
+                        'id': comment_id,
+                        'author': cnode['author']['name'],
+                        'author_id': cnode['author']['id'],
+                        'text': cnode['body']['text'] if cnode['body'] is not None else None,
+                        'sticker': sticker,
+                        'reply_to': cnode['comment_parent']
+                    }
+                except TypeError:
+                    print('Error extracting comment data', cnode)
+                    self._write_debug_json(cnode, 'debug/comment.json')
+                    exit()
+                existing_comments.append(comment_data)
+
+            #self._write_debug_json(comments, 'debug/comments.json')
+
+    def _extract_storynode(self, node_data: dict[str, Any]) -> None:
+        try:
+            story_id = node_data['post_id']
+        except KeyError:
+            self._write_debug_json(node_data, 'debug/storynopost.json')
+            exit()
+        try:
+            group_id = node_data['feedback']['associated_group']['id']
+        except KeyError:
+            print('associated_group', node_data['feedback']['associated_group'])
+            exit()
+        if story_id in self.groups[group_id]['stories']:
+            return # We only load this story once
+        # Create a new story entry        
+        has_text: bool = node_data['comet_sections']['content']['story']['comet_sections']['message'] is not None
+        if has_text:
+            story_text = node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
+        else:
+            story_text = None
+        video = None
+        if 'attachments' in node_data['comet_sections']['content']['story']:
+            for attachment in node_data['comet_sections']['content']['story']['attachments']:
+                if 'target' in attachment and attachment['target']['__typename'] == 'Video':
+                    video = attachment['target']['id']
+        author_id = node_data['comet_sections']['content']['story']['actors'][0]['id']
+        author_name = node_data['comet_sections']['content']['story']['actors'][0]['name']
+        if 'story' not in node_data['comet_sections']['feedback']:
+            print('No story in feedback', node_data['feedback'])
+            self._write_debug_json(node_data)
+            exit()
+            return
+        comments = node_data['comet_sections']['feedback']['story']['story_ufi_container']['story']['feedback_context']['interesting_top_level_comments']
+        comments_data: list[FacebookStoryComment] = []
+        for comment in comments:
+            comment_data: FacebookStoryComment = {
+                'id': comment['comment']['id'],
+                'author': comment['comment']['author']['name'],
+                'author_id': comment['comment']['author']['id'],
+                'text': comment['comment']['body']['text'],
+                'reply_to': None
             }
-            self.groups[group_id]['stories'][story_id] = story
+            comments_data.append(comment_data)
+
+        print('Found story:', story_text)
+        story: FacebookGroupStory = {
+            'author_name': author_name,
+            'author_id': author_id,
+            'text': story_text,
+            'video': video,
+            'comments': comments_data
+        }
+        self.groups[group_id]['stories'][story_id] = story
 
     def finalise(self):
         """
@@ -165,8 +277,9 @@ class FacebookGroupsPlugin(WACZPlugin):
         with open(self.output_dir / "groups.json", "w") as fw:
             json.dump(self.groups, fw, indent=2)
 
-    def _write_debug_json(self, data: Any):
-        with open('debug/debug.json', 'w') as f:
+    def _write_debug_json(self, data: Any, filename: str = 'debug/debug.json', append: bool = False) -> None:
+        mode = 'a' if append else 'w'
+        with open(filename, mode) as f:
             json.dump(data, f, indent=2)
 
     def _extract_route_definition(self, response_data: ResponseData) -> None:
@@ -233,3 +346,39 @@ class FacebookGroupsPlugin(WACZPlugin):
         except Exception:
             return None # handle other unexpected errors.
         
+    def _find_objects_by_typename(self, data: dict, target_typename: str):
+        """
+        Walks through a nested dictionary and finds all objects
+        where the "__typename" property matches the target_typename.
+        
+        Args:
+            data: A dictionary, list, or primitive value to search through
+            target_typename: The typename string to match against
+            
+        Returns:
+            A list of all objects (dictionaries) that have a matching "__typename"
+        """
+        results = []
+        
+        # Base case: data is not a dict or list
+        if not isinstance(data, (dict, list)):
+            return results
+        
+        # Case: data is a dictionary
+        if isinstance(data, dict):
+            # Check if this dictionary has the typename we're looking for
+            if data.get("__typename") == target_typename:
+                results.append(data)
+            
+            # Recursively search all values in this dictionary
+            for value in data.values():
+                results.extend(self._find_objects_by_typename(value, target_typename))
+        
+        # Case: data is a list
+        elif isinstance(data, list):
+            # Recursively search all items in this list
+            for item in data:
+                results.extend(self._find_objects_by_typename(item, target_typename))
+        
+        return results
+    

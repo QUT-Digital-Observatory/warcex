@@ -12,6 +12,7 @@ typer = "^0.15.2"
 pyfiglet = "^1.0.2"
 warcio = "^1.7.5"
 colorama = "^0.4.6"
+beautifulsoup4 = "^4.13.3"
 
 [tool.poetry.group.dev.dependencies]
 bump-my-version = "^1.0.1"

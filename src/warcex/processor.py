@@ -11,7 +11,7 @@ from typer import echo
 from pathlib import Path
 from warcex.data import RequestData, ResponseData
 from urllib.parse import urlparse, parse_qs
-
+import traceback
 class WACZProcessor:
     """
     A class for processing Web Archive Collection Zipped (WACZ) files.
@@ -289,8 +289,11 @@ class WACZProcessor:
                 
             except Exception as e:
                 # Log the error but continue with other pairs
-                echo(f"{Fore.RED}Error processing with {plugin_name}: {e}{Style.RESET_ALL}")
-                raise e
+
+                echo(f"{Fore.RED}Error processing with {plugin_name}{Style.RESET_ALL}")
+                print(traceback.format_exc())
+                
+ 
 
         # Call finalise on all plugins that were used
         self.plugin_manager.finalise_all_plugins()
