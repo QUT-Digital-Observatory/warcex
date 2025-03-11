@@ -95,11 +95,14 @@ class FacebookGroupsPlugin(WACZPlugin):
                 print('No data field in json_data')
                 return
             data_obj = json_data['data']
-            if 'node' in data_obj and data_obj['node']['__typename'] == 'Story':
-                self._extract_storynode(data_obj['node'])
-            if 'node' in data_obj and data_obj['node']['__typename'] == 'Feedback':
-                print("TRIGGERING FEEDBACK EXTRACTION")
-                self._extract_feedback(data_obj['node'])
+            if 'node' in data_obj:
+                node_type = data_obj['node']['__typename']
+                print('Node type:', data_obj['node']['__typename'])
+                if node_type == 'Story':
+                    self._extract_storynode(data_obj['node'])
+                elif node_type == 'Feedback':
+                    print("TRIGGERING FEEDBACK EXTRACTION")
+                    self._extract_feedback(data_obj['node'])
             elif 'story_card' in data_obj:
                 print("TRIGGERING STORY CARD EXTRACTION")
                 self._extract_story_card(data_obj)
@@ -117,11 +120,11 @@ class FacebookGroupsPlugin(WACZPlugin):
         if 'replies_connection' not in node:
             return
         print('EXTRACTING FEEDBACK REPLIES')
+        group_id: str = node["replies_connection"]["edges"][0]["node"]["group_comment_info"]["group"]["id"]
         replies = node['replies_connection']['edges']
         for reply in replies:
             reply_node = reply['node']
-            group_id: str = node["group_comment_info"]["group"]["id"]
-            url_parts = node["comment_action_links"][0]["comment"]["url"].split("/")
+            url_parts = reply_node["comment_action_links"][0]["comment"]["url"].split("/")
             post_index = url_parts.index("posts") if "posts" in url_parts else -1
             post_id = url_parts[post_index + 1] if post_index != -1 else None
             if not post_id or group_id not in self.groups:
@@ -136,12 +139,12 @@ class FacebookGroupsPlugin(WACZPlugin):
                 continue
             comment: FacebookStoryComment = {
                 "id": comment_id,  # Using legacy_fbid as you suggested
-                "author": node["author"]["name"],
-                "author_id": node["author"]["id"],
+                "author": reply_node["author"]["name"],
+                "author_id": reply_node["author"]["id"],
                 "text": node["body"]["text"] if "body" in node else None,
                 "sticker": None,  # No sticker in this example
-                "reply_to": node["comment_parent"]["id"] if "comment_parent" in node else None,
-                "created_time": node["created_time"]
+                "reply_to": reply_node["comment_parent"]["id"] if "comment_parent" in reply_node else None,
+                "created_time": reply_node["created_time"]
             }
             existing_comments.append(comment)
 
