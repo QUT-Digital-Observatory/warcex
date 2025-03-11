@@ -14,6 +14,7 @@ class FacebookStoryComment(TypedDict):
     text: str | None
     sticker: str | None
     reply_to: str | None
+    created_time: int
 class FacebookGroupStory(TypedDict):
     author_name: str
     author_id: str
@@ -96,6 +97,9 @@ class FacebookGroupsPlugin(WACZPlugin):
             data_obj = json_data['data']
             if 'node' in data_obj and data_obj['node']['__typename'] == 'Story':
                 self._extract_storynode(data_obj['node'])
+            if 'node' in data_obj and data_obj['node']['__typename'] == 'Feedback':
+                print("TRIGGERING FEEDBACK EXTRACTION")
+                self._extract_feedback(data_obj['node'])
             elif 'story_card' in data_obj:
                 print("TRIGGERING STORY CARD EXTRACTION")
                 self._extract_story_card(data_obj)
@@ -108,6 +112,38 @@ class FacebookGroupsPlugin(WACZPlugin):
             return
 
         self.data_pairs.append({"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
+
+    def _extract_feedback(self, node: Any):
+        if 'replies_connection' not in node:
+            return
+        print('EXTRACTING FEEDBACK REPLIES')
+        replies = node['replies_connection']['edges']
+        for reply in replies:
+            reply_node = reply['node']
+            group_id: str = node["group_comment_info"]["group"]["id"]
+            url_parts = node["comment_action_links"][0]["comment"]["url"].split("/")
+            post_index = url_parts.index("posts") if "posts" in url_parts else -1
+            post_id = url_parts[post_index + 1] if post_index != -1 else None
+            if not post_id or group_id not in self.groups:
+                continue
+            if post_id not in self.groups[group_id]['stories']:
+                print('WARN: We have a reply to a post that we do not have:', post_id)
+                continue
+            existing_comments = self.groups[group_id]['stories'][post_id]['comments']
+            comment_id = reply_node['id']
+            if comment_id in [c['id'] for c in existing_comments]:
+                print("WE HAVE THIS COMMENT ALREADY")
+                continue
+            comment: FacebookStoryComment = {
+                "id": comment_id,  # Using legacy_fbid as you suggested
+                "author": node["author"]["name"],
+                "author_id": node["author"]["id"],
+                "text": node["body"]["text"] if "body" in node else None,
+                "sticker": None,  # No sticker in this example
+                "reply_to": node["comment_parent"]["id"] if "comment_parent" in node else None,
+                "created_time": node["created_time"]
+            }
+            existing_comments.append(comment)
 
     def _extract_group_html(self, response_data: ResponseData) -> None:
         """
@@ -201,7 +237,8 @@ class FacebookGroupsPlugin(WACZPlugin):
                         'author_id': cnode['author']['id'],
                         'text': cnode['body']['text'] if cnode['body'] is not None else None,
                         'sticker': sticker,
-                        'reply_to': cnode['comment_parent']
+                        'reply_to': cnode['comment_parent'],
+                        'created_time': cnode['created_time']
                     }
                 except TypeError:
                     print('Error extracting comment data', cnode)
@@ -250,7 +287,9 @@ class FacebookGroupsPlugin(WACZPlugin):
                 'author': comment['comment']['author']['name'],
                 'author_id': comment['comment']['author']['id'],
                 'text': comment['comment']['body']['text'],
-                'reply_to': None
+                'reply_to': None,
+                'sticker': None,
+                'created_time': comment['comment']['created_time']
             }
             comments_data.append(comment_data)
 
@@ -306,8 +345,13 @@ class FacebookGroupsPlugin(WACZPlugin):
             return
         group_title, group_id, url_partial = vals
         if group_id not in self.groups:
-            print('Found Facebook group:', group_title)
-            self.groups[group_id] = {"name": group_title, "partial_url": url_partial, "stories": {}}
+            print('Found Facebook group (no description):', group_title)
+            self.groups[group_id] = {
+                "name": group_title, 
+                "partial_url": url_partial, 
+                "stories": {},
+                "location": None,
+                "description": None}
     
     def _decode_json_bytes(self, data_bytes: bytes) -> list[dict] | None:
         """
