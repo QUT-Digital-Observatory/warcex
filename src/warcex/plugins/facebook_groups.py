@@ -298,6 +298,7 @@ class FacebookGroupsPlugin(WACZPlugin):
             return  # We only load this story once
         # Create a new story entry        
         has_text: bool = node_data['comet_sections']['content']['story']['comet_sections']['message'] is not None
+        has_text = has_text and 'message' in node_data['comet_sections']['content']['story']['comet_sections']['message']['story']
         if has_text:
             story_text = \
             node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
@@ -483,8 +484,9 @@ if __name__ == "__main__":
     # --- Configuration ---
     # This configuration is equivalent to the command:
     # poetry run warcex extract /home/addison/Downloads/facebook_boyd.wacz -p src/warcex/plugins/facebook_groups.py --output-dir ./output/facebook_boyd
-    input_wacz = Path("/home/addison/Downloads/facebook_boyd.wacz").resolve()
-    output_directory = Path("./output/facebook_boyd")
+    # input_wacz = Path("/home/addison/Downloads/facebook_boyd.wacz").resolve()
+    input_wacz = Path("/home/addison/Downloads/facebook_my-archiving-session.wacz").resolve()
+    output_directory = Path("/home/addison/Downloads/facebook_my-archiving-session_output_2")
     plugin_to_run = Path(__file__).resolve()
 
     # Ensure the output directory exists
