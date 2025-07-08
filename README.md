@@ -20,6 +20,7 @@ You can write your own plugins and pass them to WARCex:
 
 ```bash
 warcx --plugin my_plugin.py extract my_wacz_file.wacz my_output_folder/
+poetry run warcex extract --plugin src/warcex/plugins/facebook_groups.py ~/Downloads/facebook_my-archiving-session.wacz --output-dir ~/Downloads/facebook_my-archiving-session_ouptut/
 ```
 You can specify mroe than one.
 

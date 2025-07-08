@@ -1,11 +1,14 @@
-from warcex.plugmanager import WACZPlugin
-#from warcex.data import RequestData, LazyResponseData
-from pathlib import Path
 import json
 from dataclasses import asdict
-from warcex.data import RequestData, ResponseData
+# from warcex.data import RequestData, LazyResponseData
+from pathlib import Path
 from typing import Any, TypedDict
+
 from bs4 import BeautifulSoup
+
+from warcex.data import RequestData, ResponseData
+from warcex.plugmanager import WACZPlugin
+
 
 class FacebookStoryComment(TypedDict):
     id: str
@@ -15,18 +18,24 @@ class FacebookStoryComment(TypedDict):
     sticker: str | None
     reply_to: str | None
     created_time: int
+
+
 class FacebookGroupStory(TypedDict):
     author_name: str
     author_id: str
     text: str | None
     video: str | None
     comments: list[FacebookStoryComment]
+
+
 class FacebookGroup(TypedDict):
     name: str
     partial_url: str
     description: str | None
     location: str | None
     stories: dict[str, FacebookGroupStory]
+
+
 class FacebookGroupsPlugin(WACZPlugin):
     """
     Facebook Groups plugin that extracts posts and comments from a Facebook Groups page. This plugin processes GraphQL API responses and extracts the data from them.
@@ -34,7 +43,7 @@ class FacebookGroupsPlugin(WACZPlugin):
 
     def __init__(self, output_dir: Path):
         super().__init__(output_dir)
-        self.data_pairs = [] 
+        self.data_pairs = []
         print('initialised')
         self.groups: dict[str, FacebookGroup] = {}
 
@@ -53,7 +62,7 @@ class FacebookGroupsPlugin(WACZPlugin):
                 "api_map.json",  # Map of the API structure
             ],
         )
-    
+
     def get_endpoints(self) -> list[str]:
         """
         Return a list of URL patterns this plugin can process.
@@ -65,7 +74,8 @@ class FacebookGroupsPlugin(WACZPlugin):
         Returns:
             List of URL patterns
         """
-        return ["https://www.facebook.com/api/graphql/", "https://www.facebook.com/ajax/bulk-route-definitions/", "https://www.facebook.com/groups/*"]
+        return ["https://www.facebook.com/api/graphql/", "https://www.facebook.com/ajax/bulk-route-definitions/",
+                "https://www.facebook.com/groups/*"]
 
     def extract(self, request_data: RequestData, response_data: ResponseData) -> None:
         """
@@ -84,7 +94,7 @@ class FacebookGroupsPlugin(WACZPlugin):
             print('GROUP PAGE:', request_data.url)
             self._extract_group_html(response_data)
             return
-        
+
         # Process data
         json_data_array = self._decode_json_bytes(response_data.content)
         if json_data_array is None:
@@ -97,6 +107,17 @@ class FacebookGroupsPlugin(WACZPlugin):
             data_obj = json_data['data']
             if 'node' in data_obj:
                 node_type = data_obj['node']['__typename']
+                if node_type == 'Group':
+                    print("Looking for potential nested first story")
+                    try:
+                        _deep_node_type = data_obj['node']['group_feed']['edges'][0]['node']['__typename']
+                        _deep_data_obj = data_obj['node']['group_feed']['edges'][0]
+                        node_type = _deep_node_type
+                        data_obj = _deep_data_obj
+                        print('Found nested first story')
+                    except KeyError:
+                        print('No nested first story')
+                        continue
                 print('Node type:', data_obj['node']['__typename'])
                 if node_type == 'Story':
                     self._extract_storynode(data_obj['node'])
@@ -114,7 +135,8 @@ class FacebookGroupsPlugin(WACZPlugin):
                 fw.write(response_data.content)
             return
 
-        self.data_pairs.append({"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
+        self.data_pairs.append(
+            {"request": asdict(request_data), "response_count": len(json_data), "response": json_data})
 
     def _extract_feedback(self, node: Any):
         if 'replies_connection' not in node:
@@ -154,31 +176,34 @@ class FacebookGroupsPlugin(WACZPlugin):
         """
         content_str = response_data.content.decode('utf-8')
         soup = BeautifulSoup(content_str, 'html.parser')
-        group_title = soup.title.string # type: ignore
+        group_title = soup.title.string  # type: ignore
         assert group_title is not None
         json_data = None
         for script in soup.find_all('script', type='application/json'):
             try:
                 # load the JSON data from the script tag
-                json_data = json.loads(script.string) # type: ignore
+                json_data = json.loads(script.string)  # type: ignore
             except json.JSONDecodeError:
                 print(f"Error decoding JSON from script tag: {script}")
                 continue
-            except TypeError: #script.string is none
+            except TypeError:  # script.string is none
                 print("script tag has no string")
                 continue
 
             if '"CometGroupDiscussionTabAboutCardRenderer"' in script.string:
-                comment_discussion_tab_cards = self._find_objects_by_typename(json_data, "CometGroupDiscussionTabAboutCardRenderer")
+                comment_discussion_tab_cards = self._find_objects_by_typename(json_data,
+                                                                              "CometGroupDiscussionTabAboutCardRenderer")
                 if comment_discussion_tab_cards:
                     card = comment_discussion_tab_cards[0]
                     group_id = card['group']['id']
                     if group_id not in self.groups:
                         group: FacebookGroup = {
                             "name": group_title,
-                            "location": card['group']['group_locations'][0]['name'] if 'group_locations' in card['group'] else None,
-                            "description": card['group']['description_with_entities']['text'] if 'description_with_entities' in card['group'] else None,
-                            "partial_url": "/groups/"+card['group']['group_address'],
+                            "location": card['group']['group_locations'][0]['name'] if 'group_locations' in card[
+                                'group'] else None,
+                            "description": card['group']['description_with_entities'][
+                                'text'] if 'description_with_entities' in card['group'] else None,
+                            "partial_url": "/groups/" + card['group']['group_address'],
                             "stories": {}
                         }
                         self.groups[group_id] = group
@@ -188,11 +213,11 @@ class FacebookGroupsPlugin(WACZPlugin):
                 for story in stories:
                     if '_post_id' in story:
                         self._extract_storynode(story)
-                    
+
         if json_data is None:
             print("No JSON data found in the HTML")
             return
-        
+
     def _extract_story_card(self, data_obj: dict[str, Any]) -> None:
         feedback_data = data_obj['feedback']
         story_card_data = data_obj['story_card']
@@ -200,7 +225,8 @@ class FacebookGroupsPlugin(WACZPlugin):
         if 'ufi_renderer' in feedback_data:
             group_id = story_card_data['target_group']['id']
             story_id = story_card_data['post_id']
-            comments = feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback']['comment_rendering_instance_for_feed_location']['comments']['edges']
+            comments = feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback'][
+                'comment_rendering_instance_for_feed_location']['comments']['edges']
             if group_id not in self.groups:
                 print('Group not found:', group_id)
                 return
@@ -209,7 +235,9 @@ class FacebookGroupsPlugin(WACZPlugin):
                 print(self.groups[group_id]['stories'].keys())
                 self._write_debug_json(feedback_data, 'debug/feedback_notfound.json')
                 story: FacebookGroupStory = {
-                    "author_name": feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback']['comment_rendering_instance_for_feed_location']['comments']['edges'][0]['node']['parent_feedback']['owning_profile']['name'],
+                    "author_name": feedback_data['ufi_renderer']['feedback']['comment_list_renderer']['feedback'][
+                        'comment_rendering_instance_for_feed_location']['comments']['edges'][0]['node'][
+                        'parent_feedback']['owning_profile']['name'],
                     "author_id": story_card_data['target_group']['id'],
                     "text": None,
                     "video": None,
@@ -249,7 +277,7 @@ class FacebookGroupsPlugin(WACZPlugin):
                     exit()
                 existing_comments.append(comment_data)
 
-            #self._write_debug_json(comments, 'debug/comments.json')
+            # self._write_debug_json(comments, 'debug/comments.json')
 
     def _extract_storynode(self, node_data: dict[str, Any]) -> None:
         try:
@@ -263,11 +291,12 @@ class FacebookGroupsPlugin(WACZPlugin):
             print('associated_group', node_data['feedback']['associated_group'])
             exit()
         if story_id in self.groups[group_id]['stories']:
-            return # We only load this story once
+            return  # We only load this story once
         # Create a new story entry        
         has_text: bool = node_data['comet_sections']['content']['story']['comet_sections']['message'] is not None
         if has_text:
-            story_text = node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
+            story_text = \
+            node_data['comet_sections']['content']['story']['comet_sections']['message']['story']['message']['text']
         else:
             story_text = None
         video = None
@@ -282,7 +311,8 @@ class FacebookGroupsPlugin(WACZPlugin):
             self._write_debug_json(node_data)
             exit()
             return
-        comments = node_data['comet_sections']['feedback']['story']['story_ufi_container']['story']['feedback_context']['interesting_top_level_comments']
+        comments = node_data['comet_sections']['feedback']['story']['story_ufi_container']['story']['feedback_context'][
+            'interesting_top_level_comments']
         comments_data: list[FacebookStoryComment] = []
         for comment in comments:
             comment_data: FacebookStoryComment = {
@@ -330,19 +360,21 @@ class FacebookGroupsPlugin(WACZPlugin):
         start_index = content_str.find('{')
         content_str = content_str[start_index:]
         json_data = json.loads(content_str)
+
         def _extract_group_info(json_data):
             payloads = json_data['payload']['payloads']
             try:
                 for key, value in payloads.items():
-                    if key.startswith('/groups/') and key.count('/') == 2: # Ignore all the sub group stuff
+                    if key.startswith('/groups/') and key.count('/') == 2:  # Ignore all the sub group stuff
                         group_title = value['result']['exports']['meta']['title']
                         group_id = value['result']['exports']['rootView']['props']['groupID']
                         url_partial = key
                         return group_title, group_id, url_partial
                 return None
             except (KeyError, TypeError):
-                print ('Error extracting group info from', payloads)
+                print('Error extracting group info from', payloads)
                 return None
+
         vals = _extract_group_info(json_data)
         if not vals:
             return
@@ -350,12 +382,12 @@ class FacebookGroupsPlugin(WACZPlugin):
         if group_id not in self.groups:
             print('Found Facebook group (no description):', group_title)
             self.groups[group_id] = {
-                "name": group_title, 
-                "partial_url": url_partial, 
+                "name": group_title,
+                "partial_url": url_partial,
                 "stories": {},
                 "location": None,
                 "description": None}
-    
+
     def _decode_json_bytes(self, data_bytes: bytes) -> list[dict] | None:
         """
         Decodes bytes that are expected to be JSON or JSONL into a list of dictionaries.
@@ -389,10 +421,10 @@ class FacebookGroupsPlugin(WACZPlugin):
         except UnicodeDecodeError:
             return None  # Handle cases where bytes are not valid UTF-8
         except json.JSONDecodeError:
-            return None # Handle cases where it is not valid json or jsonl.
+            return None  # Handle cases where it is not valid json or jsonl.
         except Exception:
-            return None # handle other unexpected errors.
-        
+            return None  # handle other unexpected errors.
+
     def _find_objects_by_typename(self, data: dict, target_typename: str):
         """
         Walks through a nested dictionary and finds all objects
@@ -406,26 +438,71 @@ class FacebookGroupsPlugin(WACZPlugin):
             A list of all objects (dictionaries) that have a matching "__typename"
         """
         results = []
-        
+
         # Base case: data is not a dict or list
         if not isinstance(data, (dict, list)):
             return results
-        
+
         # Case: data is a dictionary
         if isinstance(data, dict):
             # Check if this dictionary has the typename we're looking for
             if data.get("__typename") == target_typename:
                 results.append(data)
-            
+
             # Recursively search all values in this dictionary
             for value in data.values():
                 results.extend(self._find_objects_by_typename(value, target_typename))
-        
+
         # Case: data is a list
         elif isinstance(data, list):
             # Recursively search all items in this list
             for item in data:
                 results.extend(self._find_objects_by_typename(item, target_typename))
-        
+
         return results
-    
+
+
+if __name__ == "__main__":
+    # This entry point is for debugging and testing purposes.
+    # It simulates running the plugin from the command line with specific arguments.
+    from pathlib import Path
+    import sys
+
+    # Add the 'src' directory to the Python path to allow for absolute imports
+    # This is necessary because we are running a module from within a package.
+    src_path = Path(__file__).parent.parent.parent
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
+    from warcex.processor import WACZProcessor
+
+    # --- Configuration ---
+    # This configuration is equivalent to the command:
+    # poetry run warcex extract /home/addison/Downloads/facebook_boyd.wacz -p src/warcex/plugins/facebook_groups.py --output-dir ./output/facebook_boyd
+    input_wacz = Path("/home/addison/Downloads/facebook_boyd.wacz").resolve()
+    output_directory = Path("./output/facebook_boyd")
+    plugin_to_run = Path(__file__).resolve()
+
+    # Ensure the output directory exists
+    output_directory.mkdir(parents=True, exist_ok=True)
+
+    print("--- Running Facebook Groups Plugin Standalone ---")
+    print(f"Input WACZ: {input_wacz}")
+    print(f"Output Dir: {output_directory.resolve()}")
+    print(f"Plugin:     {plugin_to_run}")
+    print("--------------------------------------------------")
+
+    # Check if the input file exists
+    if not input_wacz.is_file():
+        print(f"Error: Input file not found at {input_wacz}")
+        sys.exit(1)
+
+    # Use a 'with' statement to ensure the processor is properly closed
+    with WACZProcessor(
+        wacz_path=input_wacz,
+        output_folder=output_directory,
+        only=None  # Set to a plugin name string to run only that plugin
+    ) as processor:
+        processor.extract()
+
+    print("\nExtraction complete.")
