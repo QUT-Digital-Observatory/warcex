@@ -196,17 +196,21 @@ class FacebookGroupsPlugin(WACZPlugin):
                 if comment_discussion_tab_cards:
                     card = comment_discussion_tab_cards[0]
                     group_id = card['group']['id']
+                    group_location = card['group']['group_locations'][0]['name'] if 'group_locations' in card['group'] and card['group']['group_locations'] else None
+                    group_description = card['group']['description_with_entities']['text'] if 'description_with_entities' in card['group'] else None
                     if group_id not in self.groups:
                         group: FacebookGroup = {
                             "name": group_title,
-                            "location": card['group']['group_locations'][0]['name'] if 'group_locations' in card[
-                                'group'] else None,
-                            "description": card['group']['description_with_entities'][
-                                'text'] if 'description_with_entities' in card['group'] else None,
-                            "partial_url": "/groups/" + card['group']['group_address'],
+                            "location": group_location,
+                            "description": group_description,
+                            "partial_url": "/groups/"+card['group']['group_address'],
                             "stories": {}
                         }
                         self.groups[group_id] = group
+                    else:
+                        # Update these fields anyway since we don't get them from the API
+                        self.groups[group_id]['location'] = group_location
+                        self.groups[group_id]['description'] = group_description
             elif '"CometStorySections"' in script.string:
                 print("Found Story nodes from HTML embedded JSON")
                 stories = self._find_objects_by_typename(json_data, "Story")

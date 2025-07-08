@@ -119,3 +119,17 @@ class WACZPlugin(ABC):
         """
         pass
 ```
+
+## Plugins
+
+### Facebook Groups
+
+
+To implement:
+
+- Further comment attachment types
+- Post shares (count)
+- Enumeration of emoji reactions
+- User status, specifically if they are an admin or moderator
+- Moderation messages
+- Test extraction from multiple groups in a single session
