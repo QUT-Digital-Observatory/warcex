@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "warcex", from = "src"}]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.11"
 typer = "^0.15.2"
 pyfiglet = "^1.0.2"
 warcio = "^1.7.5"
