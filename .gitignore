@@ -20,3 +20,5 @@ output/
 debug/
 test*.bat
 test*.py
+.direnv
+.envrc
