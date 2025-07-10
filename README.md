@@ -16,13 +16,24 @@ WARCex is intended to extract structured data from Web Archive Collections (WACZ
 
 WARCex plugins can extract data from the HTTP requests and responses in the WACZ file with a variety of techniques ranging from web scraping to API reverse engineering. Since web archives are a recording of a web session, some platforms will require the researcher to perform a series of actions so that the data is shown to the user. We cannot extract what was not 'seen' by the browser in the course of making a web archive.
 
-You can write your own plugins and pass them to WARCex:
 
+## Installation
+### Requirements
+WARCex requires Python 3.12 or later.
+
+### Installing from GitHub
+Install from GitHub using it pip:
 ```bash
-warcx --plugin my_plugin.py extract my_wacz_file.wacz my_output_folder/
-poetry run warcex extract --plugin src/warcex/plugins/facebook_groups.py ~/Downloads/facebook_my-archiving-session.wacz --output-dir ~/Downloads/facebook_my-archiving-session_ouptut/
+pip install +git://github.com/QUT-Digital-Observatory/warcex.git
 ```
-You can specify mroe than one.
+
+
+## Usage
+
+To get an overview of available commands, run:
+```bash
+warcex --help
+```
 
 You can see what plugins are available by running:
 
@@ -36,20 +47,22 @@ And you can get more information about a plugin including instructions on web ar
 warcx info <plugin-name>
 ```
 
-## Installation
-
-WARCex requires Python 3.12 or later. You can install it using pip:
+Extracting data:
 
 ```bash
-pip install +git://github.com/QUT-Digital-Observatory/warcex.git
+warcx --plugin fb-groups extract my_input_file.wacz my_output_folder/
 ```
+You can specify more than one.
 
-## Usage help
+
+# Custom plugins
+You can write your own plugins and pass them to WARCex:
 
 ```bash
-warcex --help
+warcx --plugin my_plugin.py extract my_wacz_file.wacz my_output_folder/
 ```
-## Architecture of Plugins
+
+## Plugin Architecture
 
 You can write your own plugins to extract data from WARC files. 
 
@@ -119,17 +132,3 @@ class WACZPlugin(ABC):
         """
         pass
 ```
-
-## Plugins
-
-### Facebook Groups
-
-
-To implement:
-
-- Further comment attachment types
-- Post shares (count)
-- Enumeration of emoji reactions
-- User status, specifically if they are an admin or moderator
-- Moderation messages
-- Test extraction from multiple groups in a single session
