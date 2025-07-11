@@ -95,7 +95,7 @@ class PluginManager:
         """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        self.plugins: list[WACZPlugin] = self.discover_plugins("warcex.plugins")
+        self.plugins: list[WACZPlugin] = self.discover_plugins("warcex.plugins.agpl") + self.discover_plugins("warcex.plugins.core")
         # Dictionary of compiled regular expressions to plugins
         self.pattern_to_plugin_map: Dict[re.Pattern, WACZPlugin] = (
             self._build_pattern_map()
