@@ -9,6 +9,9 @@ build:
   tools:
     python: "3.12"
 
+formats:
+  - pdf
+
 # Build documentation in the "docs/" directory with mkdocs
 mkdocs:
   configuration: mkdocs.yml
