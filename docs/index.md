@@ -23,18 +23,18 @@ warcex --help
 You can see what plugins are available by running:
 
 ```bash
-warcx plugins
+warcex plugins
 ```
 
 And you can get more information about a plugin including instructions on web archiving activity by running:
 
 ```bash
-warcx info <plugin-name>
+warcex info <plugin-name>
 ```
 
 Extracting data:
 
 ```bash
-warcx --plugin fb-groups extract my_input_file.wacz my_output_folder/
+warcex --plugin fb-groups extract my_input_file.wacz my_output_folder/
 ```
 You can specify more than one.

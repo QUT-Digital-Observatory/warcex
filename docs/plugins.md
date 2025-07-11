@@ -5,7 +5,7 @@ title: "Plugins"
 ## Facebook Groups
 
 ```bash
-warcx --plugin fb-groups extract my_input_file.wacz my_output_folder/
+warcex --plugin fb-groups extract my_input_file.wacz my_output_folder/
 ```
 
 You can specify more than one WACZ files.
@@ -15,7 +15,7 @@ You can specify more than one WACZ files.
 You can write your own plugins and pass them to WARCex:
 
 ```bash
-warcx --plugin my_plugin.py extract my_wacz_file.wacz my_output_folder/
+warcex --plugin my_plugin.py extract my_wacz_file.wacz my_output_folder/
 ``` 
 
 The pattern for a plugin by implementing the `WACZPlugin` abstract class. `is_supported` should return a bool indicating if the plugin can process the request, where the request_data from the web archive is passed in. `extract` is where the plugin processes the request and response data and writes an output to the output directory. The output file should be specified in the `output_data` field of the `PluginInfo` dataclass.
