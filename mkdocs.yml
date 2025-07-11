@@ -1,0 +1,50 @@
+site_name: warcex
+site_url: https://warcex.readthedocs.io/
+repo_url: https://github.com/QUT-Digital-Observatory/warcex
+repo_name: warcex
+site_description: warcex is a command-line tool for extracting structured data from web archives (WARC and WACZ files)
+
+nav:
+    - Home: index.md
+    - Plugins: plugins.md
+
+theme:
+  name: material
+  logo: images/warcex-logo-dark.png
+  favicon: images/warcex-favicon.png
+  features:
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7 
+        name: Switch to dark mode
+
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: false
+            show_root_heading: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
