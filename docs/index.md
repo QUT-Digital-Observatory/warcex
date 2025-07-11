@@ -2,9 +2,9 @@
 title: "warcex"
 ---
 
-WARCEX is an extensible command-line tool for extracting structured data out of WARC and WACZ files. 
+WARCEX is an extensible command-line tool for extracting structured data out of WARC and WACZ files, developed by the [Digital Observatory](https://www.digitalobservatory.net.au/).
 
-WARCex is an ARDC-funded work package under the Australian Internet Observatory.
+WARCex is being actively developed as a work package under the [Australian Internet Observatory (AIO)](https://internetobservatory.org.au/), funded by the [Australian Research Data Commons (ARDC)](https://ardc.edu.au/).
 
 ## Installation
 
@@ -12,7 +12,6 @@ Install from GitHub using it pip:
 ```bash
 pip install +git://github.com/QUT-Digital-Observatory/warcex.git
 ```
-
 
 ## Usage
 
