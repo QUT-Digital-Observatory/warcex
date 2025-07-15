@@ -22,3 +22,4 @@ test*.bat
 test*.py
 .direnv
 .envrc
+*:Zone.Identifier

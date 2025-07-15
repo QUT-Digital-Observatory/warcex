@@ -6,6 +6,14 @@ WARCEX is an extensible command-line tool for extracting structured data out of 
 
 AIO received co-investment ([doi.org/10.3565/hjrp-b141](https://doi.org/10.3565/hjrp-b141)) from the Australian Research Data Commons (ARDC) through the [HASS and Indigenous Research Data Commons](https://ardc.edu.au/hass-and-indigenous-research-data-commons/). The ARDC is enabled by the National Collaborative Research Infrastructure Strategy (NCRIS).
 
+<div class="grid" style="align-items: center; justify-items: center; margin-top: 40px" markdown>
+
+<img src="images/ado-logo-logotype-dark-cropped.png" style="width: 60%"/>
+
+<img src="images/aio-banner-logo.png" style="width: 60%" />
+
+</div>
+
 ![](images/ardc-banner-logo.svg)
 
 
