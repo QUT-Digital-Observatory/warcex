@@ -2,9 +2,12 @@
 title: "warcex"
 ---
 
-WARCEX is an extensible command-line tool for extracting structured data out of WARC and WACZ files, developed by the [Digital Observatory](https://www.digitalobservatory.net.au/).
+WARCEX is an extensible command-line tool for extracting structured data out of WARC and WACZ files, developed by the [Digital Observatory](https://www.digitalobservatory.net.au/), as part of the [Australian Internet Observatory (AIO)](https://internetobservatory.org.au/).
 
-WARCex is being actively developed as a work package under the [Australian Internet Observatory (AIO)](https://internetobservatory.org.au/), funded by the [Australian Research Data Commons (ARDC)](https://ardc.edu.au/).
+AIO received co-investment ([doi.org/10.3565/hjrp-b141](https://doi.org/10.3565/hjrp-b141)) from the Australian Research Data Commons (ARDC) through the [HASS and Indigenous Research Data Commons](https://ardc.edu.au/hass-and-indigenous-research-data-commons/). The ARDC is enabled by the National Collaborative Research Infrastructure Strategy (NCRIS).
+
+![](images/ardc-banner-logo.svg)
+
 
 ## Installation
 
